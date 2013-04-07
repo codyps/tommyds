@@ -65,11 +65,14 @@
 #endif
 
 #ifdef __cplusplus
-#if !defined(__MACH__)
-#define USE_CCGOOGLE
-#endif
-#else
-#define USE_CGOOGLE
+#include <map>
+#include <unordered_map>
+
+/* Available only in C++ */
+#define USE_GOOGLEDENSEHASH
+#define USE_GOOGLEBTREE
+#define USE_CPPMAP
+#define USE_CPPUNORDEREDMAP
 #endif
 
 /******************************************************************************/
@@ -85,7 +88,7 @@
 /* http://code.google.com/p/google-sparsehash/ in the experimental/ directory */
 /* Disabled by default because it's superseeded by the C++ version. */
 /* Note that it has a VERY BAD performance on the "Change" test. Consider to use khash if you need a C implementation. */
-#ifdef USE_CGOOGLE
+#ifdef USE_CGOOGLEDENSEHASH
 #define htonl(x) 0
 #define ntohl(x) 0
 #define Table(x) Dense##x /* Use google dense tables */
@@ -97,8 +100,20 @@
 /* Note that after erasing we always call resize(0) to possibly trigger a table resize to free some space */
 /* Otherwise, it would be an unfair advantage never shrinking on deletion. */
 /* The shrink is triggered only sometimes, so the performance doesn't suffer to much */
-#ifdef USE_CCGOOGLE
+#ifdef USE_GOOGLEDENSEHASH
 #include <google/dense_hash_map>
+#endif
+
+/* Google BTree */
+/* https://code.google.com/p/cpp-btree/ */
+#ifdef USE_GOOGLEBTREE
+#if defined(_MSC_VER) /* Allow compilation in MSVC 2010 */
+#include <stdint.h>
+typedef size_t ssize_t;
+#endif
+#undef min
+#undef max
+#include "benchmark/lib/cpp-btree/btree_map.h"
 #endif
 
 /* UTHASH */
@@ -203,10 +218,8 @@ struct nedtrie_object {
 	char payload[PAYLOAD];
 };
 
-struct hashnedtrie_object {
-	NEDTRIE_ENTRY(hashnedtrie_object) link;
+struct cpp_object {
 	unsigned value;
-	tommy_hash_t hash;
 	char payload[PAYLOAD];
 };
 
@@ -220,6 +233,7 @@ struct khash_object* KHASH;
 struct google_object* GOOGLE;
 struct uthash_object* UTHASH;
 struct nedtrie_object* NEDTRIE;
+struct cpp_object* CPP;
 #ifdef USE_JUDY
 struct judy_object* JUDY;
 #endif
@@ -281,17 +295,31 @@ tommy_trie_inplace trie_inplace;
 struct uthash_object* uthash = 0;
 struct nedtrie_t nedtrie;
 khash_t(word)* khash;
-#ifdef USE_CGOOGLE
-struct HashTable* cgoogle;
-#endif
-#ifdef USE_CCGOOGLE
+#ifdef __cplusplus
 /* use a specialized hash, otherwise the performance depends on the STL implementation used. */
-class custom_hash_compare {
+class cpp_tommy_inthash_u32 {
 public:
-	size_t operator()(const tommy_key_t key) const { return tommy_inthash_u32(key); }
+	unsigned operator()(unsigned key) const { return tommy_inthash_u32(key); }
 };
-typedef google::dense_hash_map<unsigned, struct google_object*, custom_hash_compare> ccgoogle_t;
-ccgoogle_t* ccgoogle;
+#endif
+#ifdef USE_CPPMAP
+typedef std::map<unsigned, struct cpp_object*> cppmap_t;
+cppmap_t* cppmap;
+#endif
+#ifdef USE_CPPUNORDEREDMAP
+typedef std::unordered_map<unsigned, struct cpp_object*, cpp_tommy_inthash_u32> cppunorderedmap_t;
+cppunorderedmap_t* cppunorderedmap;
+#endif
+#ifdef USE_CGOOGLEDENSEHASH
+struct HashTable* cgoogledensehash;
+#endif
+#ifdef USE_GOOGLEDENSEHASH
+typedef google::dense_hash_map<unsigned, struct google_object*, cpp_tommy_inthash_u32> googledensehash_t;
+googledensehash_t* googledensehash;
+#endif
+#ifdef USE_GOOGLEBTREE
+typedef btree::btree_map<unsigned, struct google_object*> googlebtree_t;
+googlebtree_t* googlebtree;
 #endif
 #ifdef USE_JUDY
 Pvoid_t judy = 0;
@@ -414,7 +442,12 @@ loop:
 /**
  * Max number of retries.
  */
-#define RETRY_MAX 3
+#define RETRY_MAX 7
+
+/**
+ * Max total number of test for retries.
+ */
+#define MIN_TRY 2000000
 
 /**
  * Operations.
@@ -457,14 +490,16 @@ const char* ORDER_NAME[ORDER_MAX] = {
 #define DATA_TRIE 3
 #define DATA_TRIE_INPLACE 4
 #define DATA_TREE 5
-#define DATA_KHASH 6
-#define DATA_CGOOGLE 7
-#define DATA_CCGOOGLE 8
-#define DATA_UTHASH 9
-#define DATA_NEDTRIE 10
-#define DATA_JUDY 11
-#define DATA_JUDYARRAY 12
-#define DATA_MAX 13
+#define DATA_NEDTRIE 6
+#define DATA_KHASH 7
+#define DATA_UTHASH 8
+#define DATA_JUDY 9
+#define DATA_JUDYARRAY 10
+#define DATA_GOOGLEDENSEHASH 11
+#define DATA_GOOGLEBTREE 12
+#define DATA_CPPUNORDEREDMAP 13
+#define DATA_CPPMAP 14
+#define DATA_MAX 15
 
 const char* DATA_NAME[DATA_MAX] = {
 	"tommy-hashtable",
@@ -473,13 +508,15 @@ const char* DATA_NAME[DATA_MAX] = {
 	"tommy-trie",
 	"tommy-trie-inplace",
 	"rbtree",
-	"khash",
-	"cgoogledensehash",
-	"googledensehash",
-	"uthash",
 	"nedtrie",
+	"khash",
+	"uthash",
 	"judy",
 	"judyarray",
+	"googledensehash",
+	"googlebtree",
+	"c++unorderedmap",
+	"c++map",
 };
 
 /** 
@@ -702,19 +739,40 @@ void test_alloc(void)
 		khash = kh_init(word);
 	}
 
-#ifdef USE_CGOOGLE
+#ifdef USE_CGOOGLEDENSEHASH
 	COND(DATA_CGOOGLE) {
 		GOOGLE = (struct google_object*)malloc(sizeof(struct google_object) * the_max);
-		cgoogle = AllocateHashTable(sizeof(void*), 0);
+		cgoogledensehash = AllocateHashTable(sizeof(void*), 0);
 	}
 #endif
 
-#ifdef USE_CCGOOGLE
-	COND(DATA_CCGOOGLE) {
+#ifdef USE_GOOGLEDENSEHASH
+	COND(DATA_GOOGLEDENSEHASH) {
 		GOOGLE = (struct google_object*)malloc(sizeof(struct google_object) * the_max);
-		ccgoogle = new ccgoogle_t;
-		ccgoogle->set_empty_key(-1);
-		ccgoogle->set_deleted_key(-2);
+		googledensehash = new googledensehash_t;
+		googledensehash->set_empty_key(-1);
+		googledensehash->set_deleted_key(-2);
+	}
+#endif
+
+#ifdef USE_GOOGLEBTREE
+	COND(DATA_GOOGLEBTREE) {
+		GOOGLE = (struct google_object*)malloc(sizeof(struct google_object) * the_max);
+		googlebtree = new googlebtree_t;
+	}
+#endif
+
+#ifdef USE_CPPMAP
+	COND(DATA_CPPMAP) {
+		CPP = (struct cpp_object*)malloc(sizeof(struct cpp_object) * the_max);
+		cppmap = new cppmap_t;
+	}
+#endif
+
+#ifdef USE_CPPUNORDEREDMAP
+	COND(DATA_CPPUNORDEREDMAP) {
+		CPP = (struct cpp_object*)malloc(sizeof(struct cpp_object) * the_max);
+		cppunorderedmap = new cppunorderedmap_t;
 	}
 #endif
 
@@ -736,7 +794,7 @@ void test_alloc(void)
 #ifdef USE_JUDYARRAY
 	COND(DATA_JUDYARRAY) {
 		JUDYARRAY = (struct judyarray_object*)malloc(sizeof(struct judyarray_object) * the_max);
-		judyarray = judy_open(1024, 1);
+		judyarray = (Judy*)judy_open(1024, 1);
 	}
 #endif
 }
@@ -787,17 +845,38 @@ void test_free(void)
 		free(KHASH);
 	}
 
-#ifdef USE_CGOOGLE
+#ifdef USE_CGOOGLEDENSEHASH
 	COND(DATA_CGOOGLE) {
-		FreeHashTable(cgoogle);
+		FreeHashTable(cgoogledensehash);
 		free(GOOGLE);
 	}
 #endif
 
-#ifdef USE_CCGOOGLE
-	COND(DATA_CCGOOGLE) {
+#ifdef USE_GOOGLEDENSEHASH
+	COND(DATA_GOOGLEDENSEHASH) {
 		free(GOOGLE);
-		delete ccgoogle;
+		delete googledensehash;
+	}
+#endif
+
+#ifdef USE_GOOGLEBTREE
+	COND(DATA_GOOGLEBTREE) {
+		free(GOOGLE);
+		delete googlebtree;
+	}
+#endif
+
+#ifdef USE_CPPMAP
+	COND(DATA_CPPMAP) {
+		free(CPP);
+		delete cppmap;
+	}
+#endif
+
+#ifdef USE_CPPUNORDEREDMAP
+	COND(DATA_CPPUNORDEREDMAP) {
+		free(CPP);
+		delete cppunorderedmap;
 	}
 #endif
 
@@ -879,24 +958,51 @@ void test_insert(unsigned* INSERT)
 		kh_value(khash, k) = &KHASH[i];
 	} STOP();
 
-#ifdef USE_CGOOGLE
+#ifdef USE_CGOOGLEDENSEHASH
 	START(DATA_CGOOGLE) {
 		unsigned key = INSERT[i];
 		HTItem* r;
 		u_long ptr_value = (u_long)&GOOGLE[i];
 		GOOGLE[i].value = key;
-		r = HashInsert(cgoogle, key, ptr_value);
+		r = HashInsert(cgoogledensehash, key, ptr_value);
 		if (!r)
 			abort();
 	} STOP();
 #endif
 
-#ifdef USE_CCGOOGLE
-	START(DATA_CCGOOGLE) {
+#ifdef USE_GOOGLEDENSEHASH
+	START(DATA_GOOGLEDENSEHASH) {
 		unsigned key = INSERT[i];
 		struct google_object* obj = &GOOGLE[i];
 		GOOGLE[i].value = key;
-		(*ccgoogle)[key] = obj;
+		(*googledensehash)[key] = obj;
+	} STOP();
+#endif
+
+#ifdef USE_GOOGLEBTREE
+	START(DATA_GOOGLEBTREE) {
+		unsigned key = INSERT[i];
+		struct google_object* obj = &GOOGLE[i];
+		GOOGLE[i].value = key;
+		(*googlebtree)[key] = obj;
+	} STOP();
+#endif
+
+#ifdef USE_CPPMAP
+	START(DATA_CPPMAP) {
+		unsigned key = INSERT[i];
+		struct cpp_object* obj = &CPP[i];
+		CPP[i].value = key;
+		(*cppmap)[key] = obj;
+	} STOP();
+#endif
+
+#ifdef USE_CPPUNORDEREDMAP
+	START(DATA_CPPUNORDEREDMAP) {
+		unsigned key = INSERT[i];
+		struct cpp_object* obj = &CPP[i];
+		CPP[i].value = key;
+		(*cppunorderedmap)[key] = obj;
 	} STOP();
 #endif
 
@@ -941,10 +1047,12 @@ void test_hit(unsigned* SEARCH)
 	/* always dereference the object found. It has cache effect. */
 	/* considering we are dealing with objects, it makes sense to simulate an access to it */
 	/* this favorites data structures that store part of the information in the object itself */
-	const int dereference = 1; 
+	const int dereference = 1;
+
+	const unsigned DELTA = 1;
 
 	START(DATA_TREE) {
-		unsigned key = SEARCH[i];
+		unsigned key = SEARCH[i] + DELTA;
 		struct rbt_object key_obj;
 		struct rbt_object* obj;
 		key_obj.value = key;
@@ -958,7 +1066,7 @@ void test_hit(unsigned* SEARCH)
 	} STOP();
 
 	START(DATA_HASHTABLE) {
-		unsigned key = SEARCH[i];
+		unsigned key = SEARCH[i] + DELTA;
 		unsigned hash_key = hash(key);
 		struct hashtable_object* obj;
 		obj = (struct hashtable_object*)tommy_hashtable_search(&hashtable, tommy_hashtable_compare, &key, hash_key);
@@ -971,7 +1079,7 @@ void test_hit(unsigned* SEARCH)
 	} STOP();
 
 	START(DATA_HASHDYN) {
-		unsigned key = SEARCH[i];
+		unsigned key = SEARCH[i] + DELTA;
 		unsigned hash_key = hash(key);
 		struct hashtable_object* obj;
 		obj = (struct hashtable_object*)tommy_hashdyn_search(&hashdyn, tommy_hashtable_compare, &key, hash_key);
@@ -984,7 +1092,7 @@ void test_hit(unsigned* SEARCH)
 	} STOP();
 
 	START(DATA_HASHLIN) {
-		unsigned key = SEARCH[i];
+		unsigned key = SEARCH[i] + DELTA;
 		unsigned hash_key = hash(key);
 		struct hashtable_object* obj;
 		obj = (struct hashtable_object*)tommy_hashlin_search(&hashlin, tommy_hashtable_compare, &key, hash_key);
@@ -997,7 +1105,7 @@ void test_hit(unsigned* SEARCH)
 	} STOP();
 
 	START(DATA_TRIE) {
-		unsigned key = SEARCH[i];
+		unsigned key = SEARCH[i] + DELTA;
 		struct trie_object* obj;
 		obj = (struct trie_object*)tommy_trie_search(&trie, key);
 		if (!obj)
@@ -1009,7 +1117,7 @@ void test_hit(unsigned* SEARCH)
 	} STOP();
 
 	START(DATA_TRIE_INPLACE) {
-		unsigned key = SEARCH[i];
+		unsigned key = SEARCH[i] + DELTA;
 		struct trie_inplace_object* obj;
 		obj = (struct trie_inplace_object*)tommy_trie_inplace_search(&trie_inplace, key);
 		if (!obj)
@@ -1021,7 +1129,7 @@ void test_hit(unsigned* SEARCH)
 	} STOP();
 
 	START(DATA_KHASH) {
-		unsigned key = SEARCH[i];
+		unsigned key = SEARCH[i] + DELTA;
 		unsigned hash_key = hash(key);
 		khiter_t k;
 		k = kh_get(word, khash, hash_key);
@@ -1034,11 +1142,11 @@ void test_hit(unsigned* SEARCH)
 		}
 	} STOP();
 
-#ifdef USE_CGOOGLE
+#ifdef USE_CGOOGLEDENSEHASH
 	START(DATA_CGOOGLE) {
-		unsigned key = SEARCH[i];
+		unsigned key = SEARCH[i] + DELTA;
 		HTItem* ptr;
-		ptr = HashFind(cgoogle, key);
+		ptr = HashFind(cgoogledensehash, key);
 		if (!ptr)
 			abort();
 		if (dereference) {
@@ -1049,11 +1157,11 @@ void test_hit(unsigned* SEARCH)
 	} STOP();
 #endif
 
-#ifdef USE_CCGOOGLE
-	START(DATA_CCGOOGLE) {
-		unsigned key = SEARCH[i];
-		ccgoogle_t::const_iterator ptr = ccgoogle->find(key);
-		if (ptr == ccgoogle->end())
+#ifdef USE_GOOGLEDENSEHASH
+	START(DATA_GOOGLEDENSEHASH) {
+		unsigned key = SEARCH[i] + DELTA;
+		googledensehash_t::const_iterator ptr = googledensehash->find(key);
+		if (ptr == googledensehash->end())
 			abort();
 		if (dereference) {
 			struct google_object* obj = ptr->second;
@@ -1063,8 +1171,50 @@ void test_hit(unsigned* SEARCH)
 	} STOP();
 #endif
 
+#ifdef USE_GOOGLEBTREE
+	START(DATA_GOOGLEBTREE) {
+		unsigned key = SEARCH[i] + DELTA;
+		googlebtree_t::const_iterator ptr = googlebtree->find(key);
+		if (ptr == googlebtree->end())
+			abort();
+		if (dereference) {
+			struct google_object* obj = ptr->second;
+			if (obj->value != key)
+				abort();
+		}
+	} STOP();
+#endif
+
+#ifdef USE_CPPMAP
+	START(DATA_CPPMAP) {
+		unsigned key = SEARCH[i] + DELTA;
+		cppmap_t::const_iterator ptr = cppmap->find(key);
+		if (ptr == cppmap->end())
+			abort();
+		if (dereference) {
+			struct cpp_object* obj = ptr->second;
+			if (obj->value != key)
+				abort();
+		}
+	} STOP();
+#endif
+
+#ifdef USE_CPPUNORDEREDMAP
+	START(DATA_CPPUNORDEREDMAP) {
+		unsigned key = SEARCH[i] + DELTA;
+		cppunorderedmap_t::const_iterator ptr = cppunorderedmap->find(key);
+		if (ptr == cppunorderedmap->end())
+			abort();
+		if (dereference) {
+			struct cpp_object* obj = ptr->second;
+			if (obj->value != key)
+				abort();
+		}
+	} STOP();
+#endif
+
 	START(DATA_UTHASH) {
-		unsigned key = SEARCH[i];
+		unsigned key = SEARCH[i] + DELTA;
 		struct uthash_object* obj;
 		HASH_FIND_INT(uthash, &key, obj);  
 		if (!obj)
@@ -1077,7 +1227,7 @@ void test_hit(unsigned* SEARCH)
 
 #ifdef USE_JUDY
 	START(DATA_JUDY) {
-		Word_t key = SEARCH[i];
+		Word_t key = SEARCH[i] + DELTA;
 		Pvoid_t PValue;
 		JLG(PValue, judy, key);
 		if (!PValue)
@@ -1092,7 +1242,7 @@ void test_hit(unsigned* SEARCH)
 
 #ifdef USE_JUDYARRAY
 	START(DATA_JUDYARRAY) {
-		judyvalue key = SEARCH[i];
+		judyvalue key = SEARCH[i] + DELTA;
 		JudySlot* pvalue;
 		pvalue = judy_slot(judyarray, (uchar*)&key, 0);
 		if (!pvalue)
@@ -1106,7 +1256,7 @@ void test_hit(unsigned* SEARCH)
 #endif
 
 	START(DATA_NEDTRIE) {
-		unsigned key = SEARCH[i];
+		unsigned key = SEARCH[i] + DELTA;
 		struct nedtrie_object key_obj;
 		struct nedtrie_object* obj;
 		key_obj.value = key;
@@ -1120,9 +1270,11 @@ void test_hit(unsigned* SEARCH)
 	} STOP();
 }
 
-void test_miss(unsigned* SEARCH, unsigned DELTA)
+void test_miss(unsigned* SEARCH)
 {
 	unsigned i;
+
+	const unsigned DELTA = 0;
 
 	START(DATA_TREE) {
 		struct rbt_object key;
@@ -1181,21 +1333,48 @@ void test_miss(unsigned* SEARCH, unsigned DELTA)
 			abort();
 	} STOP();
 
-#ifdef USE_CGOOGLE
+#ifdef USE_CGOOGLEDENSEHASH
 	START(DATA_CGOOGLE) {
 		unsigned key = SEARCH[i] + DELTA;
 		HTItem* ptr;
-		ptr = HashFind(cgoogle, key);
+		ptr = HashFind(cgoogledensehash, key);
 		if (ptr)
 			abort();
 	} STOP();
 #endif
 
-#ifdef USE_CCGOOGLE
-	START(DATA_CCGOOGLE) {
+#ifdef USE_GOOGLEDENSEHASH
+	START(DATA_GOOGLEDENSEHASH) {
 		unsigned key = SEARCH[i] + DELTA;
-		ccgoogle_t::const_iterator ptr = ccgoogle->find(key);
-		if (ptr != ccgoogle->end())
+		googledensehash_t::const_iterator ptr = googledensehash->find(key);
+		if (ptr != googledensehash->end())
+			abort();
+	} STOP();
+#endif
+
+#ifdef USE_GOOGLEBTREE
+	START(DATA_GOOGLEBTREE) {
+		unsigned key = SEARCH[i] + DELTA;
+		googlebtree_t::const_iterator ptr = googlebtree->find(key);
+		if (ptr != googlebtree->end())
+			abort();
+	} STOP();
+#endif
+
+#ifdef USE_CPPMAP
+	START(DATA_CPPMAP) {
+		unsigned key = SEARCH[i] + DELTA;
+		cppmap_t::const_iterator ptr = cppmap->find(key);
+		if (ptr != cppmap->end())
+			abort();
+	} STOP();
+#endif
+
+#ifdef USE_CPPUNORDEREDMAP
+	START(DATA_CPPUNORDEREDMAP) {
+		unsigned key = SEARCH[i] + DELTA;
+		cppunorderedmap_t::const_iterator ptr = cppunorderedmap->find(key);
+		if (ptr != cppunorderedmap->end())
 			abort();
 	} STOP();
 #endif
@@ -1223,8 +1402,12 @@ void test_miss(unsigned* SEARCH, unsigned DELTA)
 		judyvalue key = SEARCH[i] + DELTA;
 		JudySlot* pvalue;
 		pvalue = judy_slot(judyarray, (uchar*)&key, 0);
-		if (pvalue)
-			abort();
+		if (pvalue) {
+			/* workaround for a judyarray bug. Sometimes it returns a pvalue pointing to NULL */
+			void* obj = *(void**)pvalue;
+			if (obj)
+				abort();
+		}
 	} STOP();
 #endif
 
@@ -1347,40 +1530,88 @@ void test_change(unsigned* REMOVE, unsigned* INSERT)
 		kh_value(khash, k) = obj;
 	} STOP();
 
-#ifdef USE_CGOOGLE
+#ifdef USE_CGOOGLEDENSEHASH
 	START(DATA_CGOOGLE) {
 		unsigned key = REMOVE[i];
 		HTItem* ptr;
 		struct google_object* obj;
 		u_long ptr_value;
-		ptr = HashFind(cgoogle, key);
+		ptr = HashFind(cgoogledensehash, key);
 		if (!ptr)
 			abort();
 		obj = (void*)ptr->data;
-		HashDeleteLast(cgoogle);
+		HashDeleteLast(cgoogledensehash);
 
 		key = INSERT[i] + DELTA;
 		obj->value = key;
 		ptr_value = (u_long)obj;
-		ptr = HashInsert(cgoogle, key, ptr_value);
+		ptr = HashInsert(cgoogledensehash, key, ptr_value);
 		if (!ptr)
 			abort();
 	} STOP();
 #endif
 
-#ifdef USE_CCGOOGLE
-	START(DATA_CCGOOGLE) {
+#ifdef USE_GOOGLEDENSEHASH
+	START(DATA_GOOGLEDENSEHASH) {
 		unsigned key = REMOVE[i];
-		ccgoogle_t::iterator ptr = ccgoogle->find(key);
+		googledensehash_t::iterator ptr = googledensehash->find(key);
 		struct google_object* obj;
-		if (ptr == ccgoogle->end())
+		if (ptr == googledensehash->end())
 			abort();
 		obj = ptr->second;
-		ccgoogle->erase(ptr);
+		googledensehash->erase(ptr);
 
 		key = INSERT[i] + DELTA;
 		obj->value = key;
-		(*ccgoogle)[key] = obj;
+		(*googledensehash)[key] = obj;
+	} STOP();
+#endif
+
+#ifdef USE_GOOGLEBTREE
+	START(DATA_GOOGLEBTREE) {
+		unsigned key = REMOVE[i];
+		googlebtree_t::iterator ptr = googlebtree->find(key);
+		struct google_object* obj;
+		if (ptr == googlebtree->end())
+			abort();
+		obj = ptr->second;
+		googlebtree->erase(ptr);
+
+		key = INSERT[i] + DELTA;
+		obj->value = key;
+		(*googlebtree)[key] = obj;
+	} STOP();
+#endif
+
+#ifdef USE_CPPMAP
+	START(DATA_CPPMAP) {
+		unsigned key = REMOVE[i];
+		cppmap_t::iterator ptr = cppmap->find(key);
+		struct cpp_object* obj;
+		if (ptr == cppmap->end())
+			abort();
+		obj = ptr->second;
+		cppmap->erase(ptr);
+
+		key = INSERT[i] + DELTA;
+		obj->value = key;
+		(*cppmap)[key] = obj;
+	} STOP();
+#endif
+
+#ifdef USE_CPPUNORDEREDMAP
+	START(DATA_CPPUNORDEREDMAP) {
+		unsigned key = REMOVE[i];
+		cppunorderedmap_t::iterator ptr = cppunorderedmap->find(key);
+		struct cpp_object* obj;
+		if (ptr == cppunorderedmap->end())
+			abort();
+		obj = ptr->second;
+		cppunorderedmap->erase(ptr);
+
+		key = INSERT[i] + DELTA;
+		obj->value = key;
+		(*cppunorderedmap)[key] = obj;
 	} STOP();
 #endif
 
@@ -1422,7 +1653,6 @@ void test_change(unsigned* REMOVE, unsigned* INSERT)
 	START(DATA_JUDYARRAY) {
 		judyvalue key = REMOVE[i];
 		struct judyarray_object* obj;
-		int r;
 		JudySlot* pvalue;
 		pvalue = judy_slot(judyarray, (uchar*)&key, 0);
 		if (!pvalue)
@@ -1457,13 +1687,13 @@ void test_remove(unsigned* REMOVE)
 {
 	unsigned i;
 
-	const unsigned DELTA = 1;
-
 	/* always dereference the object deleted. It has cache effect. */
 	/* considering we are dealing with objects, it makes sense to simulate an access to it */
 	/* even on deletion, because you have at least to do a free() call. */
 	/* this favorites data structures that store part of the information in the object itself */
-	const int dereference = 1; 
+	const int dereference = 1;
+
+	const unsigned DELTA = 1;
 
 	START(DATA_TREE) {
 		unsigned key = REMOVE[i] + DELTA;
@@ -1561,16 +1791,16 @@ void test_remove(unsigned* REMOVE)
 		}
 	} STOP();
 
-#ifdef USE_CGOOGLE
+#ifdef USE_CGOOGLEDENSEHASH
 	START(DATA_CGOOGLE) {
 		unsigned key = REMOVE[i] + DELTA;
 		HTItem* ptr;
 		struct google_object* obj;
-		ptr = HashFind(cgoogle, key);
+		ptr = HashFind(cgoogledensehash, key);
 		if (!ptr)
 			abort();
 		obj = (struct google_object*)ptr->data;
-		HashDeleteLast(cgoogle);
+		HashDeleteLast(cgoogledensehash);
 		if (dereference) {
 			if (obj->value != key)
 				abort();
@@ -1578,18 +1808,69 @@ void test_remove(unsigned* REMOVE)
 	} STOP();
 #endif
 
-#ifdef USE_CCGOOGLE
-	START(DATA_CCGOOGLE) {
+#ifdef USE_GOOGLEDENSEHASH
+	START(DATA_GOOGLEDENSEHASH) {
 		unsigned key = REMOVE[i] + DELTA;
 		struct google_object* obj;
-		ccgoogle_t::iterator ptr = ccgoogle->find(key);
-		if (ptr == ccgoogle->end())
+		googledensehash_t::iterator ptr = googledensehash->find(key);
+		if (ptr == googledensehash->end())
 			abort();
 		obj = ptr->second;
-		ccgoogle->erase(ptr);
+		googledensehash->erase(ptr);
 
-		/* force a progressive deallocation, it's done when reaching a 20% occupation */
-		ccgoogle->resize(0);
+		/* force a resize when we reach 20% load factor */
+		googledensehash->resize(0);
+
+		if (dereference) {
+			if (obj->value != key)
+				abort();
+		}
+	} STOP();
+#endif
+
+#ifdef USE_GOOGLEBTREE
+	START(DATA_GOOGLEBTREE) {
+		unsigned key = REMOVE[i] + DELTA;
+		struct google_object* obj;
+		googlebtree_t::iterator ptr = googlebtree->find(key);
+		if (ptr == googlebtree->end())
+			abort();
+		obj = ptr->second;
+		googlebtree->erase(ptr);
+
+		if (dereference) {
+			if (obj->value != key)
+				abort();
+		}
+	} STOP();
+#endif
+
+#ifdef USE_CPPMAP
+	START(DATA_CPPMAP) {
+		unsigned key = REMOVE[i] + DELTA;
+		struct cpp_object* obj;
+		cppmap_t::iterator ptr = cppmap->find(key);
+		if (ptr == cppmap->end())
+			abort();
+		obj = ptr->second;
+		cppmap->erase(ptr);
+
+		if (dereference) {
+			if (obj->value != key)
+				abort();
+		}
+	} STOP();
+#endif
+
+#ifdef USE_CPPUNORDEREDMAP
+	START(DATA_CPPUNORDEREDMAP) {
+		unsigned key = REMOVE[i] + DELTA;
+		struct cpp_object* obj;
+		cppunorderedmap_t::iterator ptr = cppunorderedmap->find(key);
+		if (ptr == cppunorderedmap->end())
+			abort();
+		obj = ptr->second;
+		cppunorderedmap->erase(ptr);
 
 		if (dereference) {
 			if (obj->value != key)
@@ -1691,11 +1972,18 @@ tommy_size_t khash_size(khash_t(word)* khash)
 		+ (khash->n_buckets >> 4) * sizeof(uint32_t); /* flags */
 }
 
-#ifdef USE_CCGOOGLE
-tommy_size_t ccgoogle_size(ccgoogle_t* ccgoogle)
+#ifdef USE_GOOGLEDENSEHASH
+tommy_size_t googledensehash_size(googledensehash_t* googledensehash)
 {
-	ccgoogle_t::value_type element;
-	return ccgoogle->bucket_count() * sizeof(element);
+	googledensehash_t::value_type element;
+	return googledensehash->bucket_count() * sizeof(element);
+}
+#endif
+
+#ifdef USE_GOOGLEBTREE
+tommy_size_t googlebtree_size(googlebtree_t* googlebtree)
+{
+	return googlebtree->bytes_used();
 }
 #endif
 
@@ -1719,8 +2007,11 @@ void test_size(void)
 	MEM(DATA_TRIE, tommy_trie_memory_usage(&trie));
 	MEM(DATA_TRIE_INPLACE, tommy_trie_inplace_memory_usage(&trie_inplace));
 	MEM(DATA_KHASH, khash_size(khash));
-#ifdef USE_CCGOOGLE
-	MEM(DATA_CCGOOGLE, ccgoogle_size(ccgoogle));
+#ifdef USE_GOOGLEDENSEHASH
+	MEM(DATA_GOOGLEDENSEHASH, googledensehash_size(googledensehash));
+#endif
+#ifdef USE_GOOGLEBTREE
+	MEM(DATA_GOOGLEBTREE, googlebtree_size(googlebtree));
 #endif
 	MEM(DATA_UTHASH, uthash_size(uthash));
 	MEM(DATA_NEDTRIE, nedtrie_size(&nedtrie));
@@ -1740,14 +2031,14 @@ void test_operation(unsigned* INSERT, unsigned* SEARCH)
 	OPERATION(OPERATION_INSERT);
 	test_insert(INSERT);
 
+	OPERATION(OPERATION_CHANGE);
+	test_change(SEARCH, INSERT);
+
 	OPERATION(OPERATION_HIT);
 	test_hit(SEARCH);
 
 	OPERATION(OPERATION_MISS);
-	test_miss(SEARCH, 1);
-
-	OPERATION(OPERATION_CHANGE);
-	test_change(SEARCH, INSERT);
+	test_miss(SEARCH);
 
 	OPERATION(OPERATION_SIZE);
 	test_size();
@@ -1799,7 +2090,7 @@ void test(unsigned size, unsigned data, int log, int sparse)
 		unsigned retry;
 	
 		/* number of retries to avoid spikes */
-		retry = 500000 / the_max;
+		retry = MIN_TRY / the_max;
 		if (retry < 1)
 			retry = 1;
 		if (retry > RETRY_MAX)
