@@ -1,5 +1,5 @@
 /*
- * Copyright 2010 Andrea Mazzoleni. All rights reserved.
+ * Copyright (c) 2010, Andrea Mazzoleni. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,10 +12,10 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY ANDREA MAZZOLENI AND CONTRIBUTORS ``AS IS''
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL ANDREA MAZZOLENI OR CONTRIBUTORS BE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
  * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
  * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
@@ -51,7 +51,7 @@
 #include <mach/mach_time.h>
 #endif
 
-#include "tommy.h"
+#include "tommyds/tommy.h"
 
 #define MAX 1000000
 
@@ -240,8 +240,8 @@ void start(const char* str)
 
 void stop()
 {
-	tommy_uint64_t stop = nano();
-	printf("%25s %8u [ms], %8u [compare]\n", the_str, (unsigned)((stop - the_start) / 1000000), compare_counter);
+	tommy_uint64_t the_stop = nano();
+	printf("%25s %8u [ms], %8u [compare]\n", the_str, (unsigned)((the_stop - the_start) / 1000000), compare_counter);
 }
 
 #define START(s) start(s)
@@ -379,7 +379,7 @@ void test_array(void)
 	tommy_array_init(&array);
 
 	START("array init");
-	for(i=0;i<MAX*10;++i) {
+	for(i=0;i<MAX*100;++i) {
 		tommy_array_grow(&array, i + 1);
 		if (tommy_array_get(&array, i) != 0)
 			abort();
@@ -387,13 +387,13 @@ void test_array(void)
 	STOP();
 
 	START("array set");
-	for(i=0;i<MAX*10;++i) {
+	for(i=0;i<MAX*100;++i) {
 		tommy_array_set(&array, i, (void*)i);
 	}
 	STOP();
 
 	START("array get");
-	for(i=0;i<MAX*10;++i) {
+	for(i=0;i<MAX*100;++i) {
 		if (tommy_array_get(&array, i) != (void*)i)
 			abort();
 	}
@@ -401,6 +401,38 @@ void test_array(void)
 
 	tommy_array_done(&array);
 }
+
+void test_arrayblk(void)
+{
+	tommy_arrayblk arrayblk;
+	unsigned i;
+
+	tommy_arrayblk_init(&arrayblk);
+
+	START("arrayblk init");
+	for(i=0;i<MAX*100;++i) {
+		tommy_arrayblk_grow(&arrayblk, i + 1);
+		if (tommy_arrayblk_get(&arrayblk, i) != 0)
+			abort();
+	}
+	STOP();
+
+	START("arrayblk set");
+	for(i=0;i<MAX*100;++i) {
+		tommy_arrayblk_set(&arrayblk, i, (void*)i);
+	}
+	STOP();
+
+	START("arrayblk get");
+	for(i=0;i<MAX*100;++i) {
+		if (tommy_arrayblk_get(&arrayblk, i) != (void*)i)
+			abort();
+	}
+	STOP();
+
+	tommy_arrayblk_done(&arrayblk);
+}
+
 
 void test_hashdyn(void)
 {
@@ -567,6 +599,7 @@ int main() {
 
 	test_list();
 	test_array();
+	test_arrayblk();
 	test_hashdyn();
 	test_hashlin();
 

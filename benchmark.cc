@@ -1,5 +1,5 @@
 /*
- * Copyright 2010 Andrea Mazzoleni. All rights reserved.
+ * Copyright (c) 2010, Andrea Mazzoleni. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,10 +12,10 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY ANDREA MAZZOLENI AND CONTRIBUTORS ``AS IS''
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL ANDREA MAZZOLENI OR CONTRIBUTORS BE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
  * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
  * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
@@ -64,13 +64,11 @@
 #define USE_JUDY
 #endif
 
-#ifdef __cplusplus
-#include <map>
-#include <unordered_map>
-
 /* Available only in C++ */
+#ifdef __cplusplus
 #define USE_GOOGLEDENSEHASH
 #define USE_GOOGLEBTREE
+#define USE_STXBTREE
 #define USE_CPPMAP
 #define USE_CPPUNORDEREDMAP
 #endif
@@ -81,8 +79,18 @@
 /* Tommy data structures */
 /* We directly include the C file to have functions automatically */
 /* expanded inline by the compiler like other implementations */
-#include "tommy.h"
-#include "tommy.c"
+#include "tommyds/tommy.h"
+#include "tommyds/tommy.c"
+
+/* C++ Btree */
+#ifdef USE_CPPMAP
+#include <map>
+#endif
+
+/* C++ Hashtable */
+#ifdef USE_CPPUNORDEREDMAP
+#include <unordered_map>
+#endif
 
 /* Google C dense hash table */
 /* http://code.google.com/p/google-sparsehash/ in the experimental/ directory */
@@ -114,6 +122,12 @@ typedef size_t ssize_t;
 #undef min
 #undef max
 #include "benchmark/lib/cpp-btree/btree_map.h"
+#endif
+
+/* STX BTree */
+/* http://panthema.net/2007/stx-btree/ */
+#ifdef USE_STXBTREE
+#include "benchmark/lib/stx/btree_map.h"
 #endif
 
 /* UTHASH */
@@ -190,6 +204,11 @@ struct google_object {
 	char payload[PAYLOAD];
 };
 
+struct stx_object {
+	unsigned value;
+	char payload[PAYLOAD];
+};
+
 struct trie_object {
 	tommy_trie_node node;
 	unsigned value;
@@ -231,6 +250,7 @@ struct trie_object* TRIE;
 struct trie_inplace_object* TRIE_INPLACE;
 struct khash_object* KHASH;
 struct google_object* GOOGLE;
+struct stx_object* STX;
 struct uthash_object* UTHASH;
 struct nedtrie_object* NEDTRIE;
 struct cpp_object* CPP;
@@ -320,6 +340,10 @@ googledensehash_t* googledensehash;
 #ifdef USE_GOOGLEBTREE
 typedef btree::btree_map<unsigned, struct google_object*> googlebtree_t;
 googlebtree_t* googlebtree;
+#endif
+#ifdef USE_STXBTREE
+typedef stx::btree_map<unsigned, struct stx_object*> stxbtree_t;
+stxbtree_t* stxbtree;
 #endif
 #ifdef USE_JUDY
 Pvoid_t judy = 0;
@@ -497,9 +521,10 @@ const char* ORDER_NAME[ORDER_MAX] = {
 #define DATA_JUDYARRAY 10
 #define DATA_GOOGLEDENSEHASH 11
 #define DATA_GOOGLEBTREE 12
-#define DATA_CPPUNORDEREDMAP 13
-#define DATA_CPPMAP 14
-#define DATA_MAX 15
+#define DATA_STXBTREE 13
+#define DATA_CPPUNORDEREDMAP 14
+#define DATA_CPPMAP 15
+#define DATA_MAX 16
 
 const char* DATA_NAME[DATA_MAX] = {
 	"tommy-hashtable",
@@ -515,6 +540,7 @@ const char* DATA_NAME[DATA_MAX] = {
 	"judyarray",
 	"googledensehash",
 	"googlebtree",
+	"stxbtree",
 	"c++unorderedmap",
 	"c++map",
 };
@@ -762,6 +788,13 @@ void test_alloc(void)
 	}
 #endif
 
+#ifdef USE_STXBTREE
+	COND(DATA_STXBTREE) {
+		STX = (struct stx_object*)malloc(sizeof(struct stx_object) * the_max);
+		stxbtree = new stxbtree_t;
+	}
+#endif
+
 #ifdef USE_CPPMAP
 	COND(DATA_CPPMAP) {
 		CPP = (struct cpp_object*)malloc(sizeof(struct cpp_object) * the_max);
@@ -830,7 +863,6 @@ void test_free(void)
 		if (tommy_trie_count(&trie) != 0)
 			abort();
 		tommy_allocator_done(&trie_allocator);
-		tommy_trie_done(&trie);
 		free(TRIE);
 	}
 
@@ -863,6 +895,13 @@ void test_free(void)
 	COND(DATA_GOOGLEBTREE) {
 		free(GOOGLE);
 		delete googlebtree;
+	}
+#endif
+
+#ifdef USE_STXBTREE
+	COND(DATA_STXBTREE) {
+		free(STX);
+		delete stxbtree;
 	}
 #endif
 
@@ -985,6 +1024,15 @@ void test_insert(unsigned* INSERT)
 		struct google_object* obj = &GOOGLE[i];
 		GOOGLE[i].value = key;
 		(*googlebtree)[key] = obj;
+	} STOP();
+#endif
+
+#ifdef USE_STXBTREE
+	START(DATA_STXBTREE) {
+		unsigned key = INSERT[i];
+		struct stx_object* obj = &STX[i];
+		STX[i].value = key;
+		(*stxbtree)[key] = obj;
 	} STOP();
 #endif
 
@@ -1185,6 +1233,20 @@ void test_hit(unsigned* SEARCH)
 	} STOP();
 #endif
 
+#ifdef USE_STXBTREE
+	START(DATA_STXBTREE) {
+		unsigned key = SEARCH[i] + DELTA;
+		stxbtree_t::const_iterator ptr = stxbtree->find(key);
+		if (ptr == stxbtree->end())
+			abort();
+		if (dereference) {
+			struct stx_object* obj = ptr->second;
+			if (obj->value != key)
+				abort();
+		}
+	} STOP();
+#endif
+
 #ifdef USE_CPPMAP
 	START(DATA_CPPMAP) {
 		unsigned key = SEARCH[i] + DELTA;
@@ -1360,6 +1422,16 @@ void test_miss(unsigned* SEARCH)
 			abort();
 	} STOP();
 #endif
+
+#ifdef USE_STXBTREE
+	START(DATA_STXBTREE) {
+		unsigned key = SEARCH[i] + DELTA;
+		stxbtree_t::const_iterator ptr = stxbtree->find(key);
+		if (ptr != stxbtree->end())
+			abort();
+	} STOP();
+#endif
+
 
 #ifdef USE_CPPMAP
 	START(DATA_CPPMAP) {
@@ -1580,6 +1652,22 @@ void test_change(unsigned* REMOVE, unsigned* INSERT)
 		key = INSERT[i] + DELTA;
 		obj->value = key;
 		(*googlebtree)[key] = obj;
+	} STOP();
+#endif
+
+#ifdef USE_STXBTREE
+	START(DATA_STXBTREE) {
+		unsigned key = REMOVE[i];
+		stxbtree_t::iterator ptr = stxbtree->find(key);
+		struct stx_object* obj;
+		if (ptr == stxbtree->end())
+			abort();
+		obj = ptr->second;
+		stxbtree->erase(ptr);
+
+		key = INSERT[i] + DELTA;
+		obj->value = key;
+		(*stxbtree)[key] = obj;
 	} STOP();
 #endif
 
@@ -1845,6 +1933,23 @@ void test_remove(unsigned* REMOVE)
 	} STOP();
 #endif
 
+#ifdef USE_STXBTREE
+	START(DATA_STXBTREE) {
+		unsigned key = REMOVE[i] + DELTA;
+		struct stx_object* obj;
+		stxbtree_t::iterator ptr = stxbtree->find(key);
+		if (ptr == stxbtree->end())
+			abort();
+		obj = ptr->second;
+		stxbtree->erase(ptr);
+
+		if (dereference) {
+			if (obj->value != key)
+				abort();
+		}
+	} STOP();
+#endif
+
 #ifdef USE_CPPMAP
 	START(DATA_CPPMAP) {
 		unsigned key = REMOVE[i] + DELTA;
@@ -1987,6 +2092,15 @@ tommy_size_t googlebtree_size(googlebtree_t* googlebtree)
 }
 #endif
 
+#ifdef USE_STXBTREE
+tommy_size_t stxbtree_size(stxbtree_t* stxbtree)
+{
+	return stxbtree->get_stats().leaves * sizeof(struct stxbtree_t::btree_impl::leaf_node)
+		+ stxbtree->get_stats().innernodes * sizeof(struct stxbtree_t::btree_impl::inner_node);
+	return 0;
+}
+#endif
+
 tommy_size_t rbt_size(rbtree_t* tree, unsigned count)
 {
 	struct rbt_object element;
@@ -2012,6 +2126,9 @@ void test_size(void)
 #endif
 #ifdef USE_GOOGLEBTREE
 	MEM(DATA_GOOGLEBTREE, googlebtree_size(googlebtree));
+#endif
+#ifdef USE_STXBTREE
+	MEM(DATA_STXBTREE, stxbtree_size(stxbtree));
 #endif
 	MEM(DATA_UTHASH, uthash_size(uthash));
 	MEM(DATA_NEDTRIE, nedtrie_size(&nedtrie));
