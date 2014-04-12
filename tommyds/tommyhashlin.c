@@ -65,27 +65,6 @@ void tommy_hashlin_done(tommy_hashlin* hashlin)
 }
 
 /**
- * Return the bucket at the specified pos.
- */
-tommy_inline tommy_hashlin_node** tommy_hashlin_pos(tommy_hashlin* hashlin, tommy_hash_t pos)
-{  
-	unsigned bsr;  
- 
-	/* special case for the first bucket */
-	if (pos < (1 << TOMMY_HASHLIN_BIT)) {
-		return &hashlin->bucket[0][pos];
-	}
-
-	/* get the highest bit set */
-	bsr = tommy_ilog2_u32(pos);
-
-	/* clear the highest bit */
-	pos -= 1 << bsr;
-
-	return &hashlin->bucket[bsr - TOMMY_HASHLIN_BIT + 1][pos];
-}
-
-/**
  * Return the bucket to use.
  */
 tommy_inline tommy_hashlin_node** tommy_hashlin_bucket_ptr(tommy_hashlin* hashlin, tommy_hash_t hash)
