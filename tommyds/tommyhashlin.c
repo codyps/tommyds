@@ -47,7 +47,7 @@ void tommy_hashlin_init(tommy_hashlin* hashlin)
 	hashlin->bucket_bit = TOMMY_HASHLIN_BIT;
 	hashlin->bucket_max = 1 << hashlin->bucket_bit;
 	hashlin->bucket_mask = hashlin->bucket_max - 1;
-	hashlin->bucket[0] = tommy_cast(tommy_hashlin_node**, tommy_malloc(hashlin->bucket_max * sizeof(tommy_hashlin_node*)));
+	hashlin->bucket[0] = tommy_malloc(hashlin->bucket_max * sizeof(tommy_hashlin_node*));
 	memset(hashlin->bucket[0], 0, hashlin->bucket_max * sizeof(tommy_hashlin_node*));
 	hashlin->bucket_mac = 1;
 
@@ -111,7 +111,7 @@ tommy_inline void hashlin_grow_step(tommy_hashlin* hashlin)
 			++hashlin->bucket_bit;
 			hashlin->bucket_max = 1 << hashlin->bucket_bit;
 			hashlin->bucket_mask = hashlin->bucket_max - 1;
-			hashlin->bucket[hashlin->bucket_mac] = tommy_cast(tommy_hashlin_node**, tommy_malloc(hashlin->low_max * sizeof(tommy_hashlin_node*)));
+			hashlin->bucket[hashlin->bucket_mac] = tommy_malloc(hashlin->low_max * sizeof(tommy_hashlin_node*));
 			++hashlin->bucket_mac;
 
 			/* start from the beginning going forward */
