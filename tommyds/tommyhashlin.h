@@ -308,5 +308,16 @@ tommy_node *tommy_hashlin_next(tommy_hashlin *hl, tommy_node *n, unsigned *i_, u
 	tommy_hashlin_for_each(hl__, node__, i__, j__)			\
 	if ((entry__ = node__->data), true)
 
+
+
+#define FMT_TOMMY_NODE "{ .data = %p, .key = %#llx, .next = %p, .prev = %p }"
+#define EXP_TOMMY_NODE(n_) (n_).data, (unsigned long long)(n_).key, (n_).next, (n_).prev
+
+#define EXP_TOMMY_HASHLIN(hl_)	(hl_).bucket_bit, (hl_).bucket_max,	\
+		(hl_).bucket_mask, (hl_).bucket_mac, (hl_).low_max,	\
+		(hl_).low_mask, (hl_).split, (hl_).state, (hl_).count
+#define FMT_TOMMY_HASHLIN "{ .bucket_bit=0x%x, .bucket_max=%u, .bucket_mask=0x%x, .bucket_mac=%u, .low_max=%u, .low_mask=0x%x, .split=%u, .state=%u, .count=%u }"
+
+
 #endif
 
