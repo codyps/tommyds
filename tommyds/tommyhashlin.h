@@ -282,6 +282,24 @@ tommy_inline tommy_hashlin_node** tommy_hashlin_pos(tommy_hashlin* hashlin, tomm
 	return &hashlin->bucket[bsr - TOMMY_HASHLIN_BIT + 1][pos];
 }
 
+tommy_node *tommy_hashlin_first(tommy_hashlin *hl, unsigned *i_, unsigned *j_);
+tommy_node *tommy_hashlin_next(tommy_hashlin *hl, tommy_node *n, unsigned *i_, unsigned *j_);
+
+#define tommy_hashlin_for_each(hl__, node__, i__, j__)		\
+	for (node__ = tommy_hashlin_first(hl__, &i__, &j__);	\
+	     node__;						\
+	     node__ = tommy_hashlin_next(hl__, node__,  &i__, &j__))
+
+/*
+ * tommy_hashlin *hl;
+ * TYPE entry; # will be set by a (void *)
+ * tommy_node *node;
+ * unsigned i;
+ * unsigned j;
+ */
+#define tommy_hashlin_for_each_entry(hl__, entry__, node__, i__, j__)	\
+	tommy_hashlin_for_each(hl__, node__, i__, j__)			\
+	if ((entry__ = node__->data), true)
 
 #endif
 

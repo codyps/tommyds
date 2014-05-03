@@ -298,3 +298,42 @@ tommy_size_t tommy_hashlin_memory_usage(tommy_hashlin* hashlin)
 		+ hashlin->count * (tommy_size_t)sizeof(tommy_hashlin_node);
 }
 
+static size_t tommy_hashlin_vector_size(tommy_hashlin *hl, unsigned vector)
+{
+	return (1 << vector) * (1 << TOMMY_HASHLIN_BIT);
+}
+
+static tommy_node *tommy_hashlin_next_bucket(tommy_hashlin *hl, unsigned *i_, unsigned *j_)
+{
+	/* scan for the first non-null node */
+	unsigned i, j;
+	for (i = *i_; i < hl->bucket_mac; i++)
+		for (j = *j_; j < tommy_hashlin_vector_size(hl, i); j++)
+			if (hl->bucket[i][j]) {
+				*i_ = i;
+				*j_ = j + 1;
+				return hl->bucket[i][j];
+			}
+	return NULL;
+}
+
+tommy_node *tommy_hashlin_next(tommy_hashlin *hl, tommy_node *n, unsigned *i_, unsigned *j_)
+{
+	if (n->next)
+		return n->next;
+
+	return tommy_hashlin_next_bucket(hl, i_, j_);
+}
+
+tommy_node *tommy_hashlin_first(tommy_hashlin *hl, unsigned *i_, unsigned *j_)
+{
+	*i_ = 0;
+	*j_ = 0;
+	/* XXX: we could have a more generic version of this if we also track
+	 * how many buckets we've seen */
+	if (!hl->count)
+		return NULL;
+	return tommy_hashlin_next_bucket(hl, i_, j_);
+}
+
+
