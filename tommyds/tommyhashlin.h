@@ -164,14 +164,21 @@ typedef tommy_node tommy_hashlin_node;
  * Linear chained hashtable.
  */
 typedef struct tommy_hashlin_struct {
+	/* tommy_hashlin_node *bucket[i][j]
+	 * ARRAY_SIZE(bucket[0]) = 1 << TOMMY_HASHLIN_BIT,
+	 * ARRAY_SIZE(bucket[1]) = 2 * ARRAY_SIZE(bucket[0])
+	 * ARRAY_SIZE(bucket[i]) = 2 * ARRAY_SIZE(bucket[i - 1])
+	 * ARRAY_SIZE(bucket[i]) = (2**i) * (1 << TOMMY_HASHLIN_BIT)
+	 * ARRAY_SIZE(bucket[i]) = (1 << i) * (1 << TOMMY_HASHLIN_BIT)
+	 */
 	tommy_hashlin_node** bucket[TOMMY_HASHLIN_BIT_MAX]; /**< Dynamic array of hash buckets. One list for each hash modulus. */
-	unsigned bucket_bit; /**< Bits used in the bit mask. */
-	unsigned bucket_max; /**< Number of buckets. */
-	unsigned bucket_mask; /**< Bit mask to access the buckets. */
-	unsigned bucket_mac; /**< Number of vectors allocated. */
-	unsigned low_max; /**< Low order max value. */
-	unsigned low_mask; /**< Low order mask value. */
-	unsigned split; /**< Split position. */
+	unsigned bucket_bit; /**< Bits used in the bit mask = ilog2(bucket_max) */
+	unsigned bucket_max; /**< Number of buckets, maximum [j] */
+	unsigned bucket_mask; /**< Bit mask to access the buckets = bucket_max - 1 */
+	unsigned bucket_mac; /**< Number of vectors allocated, maximum [i] */
+	unsigned low_max; /**< Low order max value [j] */
+	unsigned low_mask; /**< Low order mask value  */
+	unsigned split; /**< Split position [j] */
 	unsigned state; /**< Reallocation state. */
 	unsigned count; /**< Number of elements. */
 } tommy_hashlin;
